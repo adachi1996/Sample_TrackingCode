@@ -1,0 +1,304 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Apr 22 22:55:47 2020
+
+@author: 足立
+～概要～
+・これはゼミ用に作成した簡易トラッキングコードVer1です。
+・基本的な機能しかありません。磁場マップの領域外に出たり、物理的におかしな値になったらエラーを出すか
+　間違ったまま計算をする可能性があります。
+・参考になればいいかなと思います。
+～構成～
+・ユーザー関数が2つとmain部に分かれています。
+・main部は5つのセクションに分かれているが、セクション1で計算条件やファイル名の設定などを行うので基本的に
+　セクション1しか触らないと思われます。
+
+
+ 未実装(実装予定)
+ ・閉軌道導出
+ ・モデル磁場
+ ・チューン導出
+"""
+#==============================================================================
+"""
+必要なライブラリのインポートを行う。
+"""
+import math                     #sinとかの関数を扱うためにインポート
+import numpy as np              #配列を扱うnumpyのインポート
+import matplotlib.pyplot as plt #グラププロット用
+#==============================================================================
+"""ユーザー関数1　：　磁場補完
+粒子を囲む8つのバームクーヘンの体積を計算し、重み付き計算から磁場を求める
+"""
+def complement():
+    #現在の粒子の位置に最も近く、小さい値の格納されている配列番号の計算
+    r_list_num  = int((val_r  -  min_r)/deruta_r )
+    th_list_num = int((val_th - min_th)/deruta_th)
+    z_list_num  = int((val_z  -  min_z)/deruta_z )
+#    print(r_list_num ,th_list_num ,z_list_num )
+
+    #磁場補完計算用配列の準備
+    V = [0,0,0,0,0,0,0,0]
+    cal_Br  = 0
+    cal_Bth = 0
+    cal_Bz  = 0
+
+    #任意の点P(r, y)を囲む格子の座標と面積を計算する部分
+    """
+    y(鉛直方向)↑,　r(半径方向)↗, th(角度方向)↶ という座標において、以下の格子を考える(なぜこの順番になったかは聞かないで)
+    実際は手前側(B1~4)側が小さく、奥側が広がったバームクーヘン型をしている(円筒座標系のため)
+    磁場補完する任意の点Pは以下の図中には表示できていない
+
+                  B8---------B7
+                  /V1   /V2 /|
+                 /____ /___/ |
+                /     /   /| |
+               /     /   / |/|
+             B4---------B3 | |←V4
+              |     |   | /| B5
+              |V5   |V6 |/ |/
+              |-----+---|  /
+              |V7   |V8 | /
+             B2---------B1
+
+    """
+
+    for i in range(2):
+        for j in range(2):
+            for k in range(2):
+                #対象座標における磁場のリスト番号の計算
+                B_num        = (r_list_num+i)*z_num*th_num + (z_list_num+j)*th_num + (th_list_num+k)
+                #磁場補完における磁場の座標と対称に位置する体積の計算
+#                        print(r_num,th_num,y_num,y,len(data[1]))
+                V[4*i+2*j+k] = abs(0.5*(r_list[r_list_num+(1-i)]**2.0 - val_r**2.0)*(z_list[z_list_num+(1-j)] - val_z)*\
+                                        math.radians(th_list[th_list_num+(1-k)] - val_th))
+                #総和をとっていく
+                cal_Br  += Br_list[ B_num]*V[4*i+2*j+k]
+                cal_Bth += Bth_list[B_num]*V[4*i+2*j+k]
+                cal_Bz  += Bz_list[ B_num]*V[4*i+2*j+k]
+
+    #重み付き計算により最終的な値を計算。if文は対称性
+    sum_V = sum(V)
+    if z >= 0:
+        cal_Br  =  cal_Br/sum_V
+        cal_Bth = cal_Bth/sum_V
+        cal_Bz  =  cal_Bz/sum_V
+    else:
+        cal_Br  = -cal_Br/sum_V
+        cal_Bth =-cal_Bth/sum_V
+        cal_Bz  =  cal_Bz/sum_V
+
+#    print(Bz_list[B_num ], cal_Bz)
+
+    return cal_Br, cal_Bth, cal_Bz
+#==============================================================================
+"""ユーザー関数2　：　磁場中の粒子の運動方程式
+ルンゲクッタ法を使って解く上微分方程式
+"""
+def cal_RK():
+    r   = ks[0]
+    pr  = ks[2]
+    pth = ks[3]
+    pz  = ks[4]
+    krf   = h*(r*pr/pth)
+    kzf   = h*(r*pz/pth)
+    ktf   = h*(r*(gamma*m0)/pth)/c
+    kprf  = h*((c*1.0e-6*r/pth)*(pth*Bz - pz*Bth) + pth)
+    kpthf = h*((c*1.0e-6*r/pth)*(pz*Br  - pr*Bz ) - pr )
+    kpzf  = h*((c*1.0e-6*r/pth)*(pr*Bth - pth*Br))
+    return np.array([krf,kzf,kprf,kpthf,kpzf,ktf])
+#==============================================================================
+
+"""
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■　main　■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■"""
+#==============================================================================
+"""セクション1
+ここは計算条件を入力するところ。基本的にはこのセクションしか変更しない
+"""
+#以下は初期条件
+r0  = 4.41663717800539  #[m]
+z0  = 0.0  #[m]
+th0 = 0.0  #[deg.]
+t0  = 0.0  #[sec]
+T0  = 10.0 #[MeV]  ※運動エネルギー
+
+#設定値
+cal_rev = 10.0 #[turn] ※周回数
+save_th = 30.0 #[deg.] ※保存する角度
+dth = 1.0e-3  #[deg.] ※ルンゲクッタの刻み幅
+
+#ファイル名など
+file_name = "Field_map_for_checking"   #使用する磁場マップのファイル名(.tableはつけない)
+save_name = "result" #結果を保存するファイル名(csvで出力)
+#==========================================================================
+"""セクション2
+ここは定数の設定などを行う。基本的には触らない。
+"""
+#定数
+PI = math.pi
+m0 = 938.2720813  #[MwV/c^2]
+c  = 2.99792458e8 #[m/s]
+
+#その他定数の計算
+P = (T0**2.0+2.0*m0*T0)**0.5
+h = math.radians(dth)
+#==========================================================================
+"""セクション3
+磁場マップを読み込んで、用意した配列に格納する
+"""
+#磁場マップを入れる配列の用意
+Br_list  = []
+Bth_list = []
+Bz_list  = []
+
+#位置の情報を入れる配列の用意
+r_list  = []
+th_list = []
+z_list  = []
+
+#配列に入れる際の重複を避けるための仮入れ物(値は適当)
+temp_r   = 1e5
+temp_th  = 1e5
+temp_z   = 1e5
+count_r  = 0
+count_th = 0
+count_z  = 0
+
+#以下からは磁場マップデータの読み取り
+f = open(file_name+'.table','r')#ファイルオープン
+count = 1
+import_count = 0
+for i in f:
+    if count == 1:
+        temp = i.split()
+        z_num  = int(temp[1])
+        r_num  = int(temp[2])
+        th_num = int(temp[0])
+        all_data_num = r_num*th_num*z_num
+    if count > 8:
+        #1行ごとデータを読み込む
+        temp = i.split()    #スペースで分割
+        x  = float(temp[0])
+        y  = float(temp[1])
+        z  = float(temp[2])
+        Bx = float(temp[3])
+        By = float(temp[4])
+        Bz = float(temp[5])
+
+        #座標変換
+        r   = round(0.01 * (x**2.0 + y**2.0)**0.5     ,6) #何となく6にした
+        th  = math.atan(y/x) #座標変換用にthだけroundを通さない
+        z   = round(0.01 * z                          ,6)
+        Br  = round( Bx*math.cos(th) + By*math.sin(th),6)*1e-4
+        Bth = round(-Bx*math.sin(th) + By*math.cos(th),6)*1e-4
+        Bz  = round( Bz                               ,6)*1e-4
+        th  = round(math.degrees(th)                  ,6)
+
+        #以下のif分は重複を防ぎつつ保存するためのもの
+        if temp_r  != r  and count_r < r_num:
+            r_list.append(r)
+            temp_r   = r
+            count_r += 1
+        if temp_th != th and count_th < th_num:
+            th_list.append(th)
+            temp_th   = y
+            count_th += 1
+        if temp_z != z   and count_z < z_num:
+            z_list.append(z)
+            temp_z   = z
+            count_z += 1
+
+        Br_list.append(Br)
+        Bth_list.append(Bth)
+        Bz_list.append(Bz)
+
+        if (count-9) == int(import_count*all_data_num/10):
+            print('NOW LOADING . . . ', 10*import_count,'%' )
+            import_count += 1
+    count += 1
+f.close()
+#==========================================================================
+"""セクション4
+トラッキングを行う。任意の角度ごとの保存とルンゲクッタコードの呼び出しを行う。
+"""
+#計算結果を入れる配列を準備
+result = [[] for i in range(10)]
+
+#トラッキング用定数の準備
+max_count_number  = int(cal_rev*360.0/dth) + 1 #終了条件
+save_count_number = int(save_th/dth) #保存角度の整数化
+deruta_r  =  r_list[1] -  r_list[0]  #ｒの刻み幅
+deruta_th = th_list[1] - th_list[0]  #thの刻み幅
+deruta_z  =  z_list[1] -  r_list[0]  #zの刻み幅
+min_r  = min(r_list)
+min_th = min(th_list)
+min_z  = min(z_list)
+boundary_theta_number = int(max(th_list)/dth)
+
+#トラッキング内専用変数の準備
+val_r  = r0
+val_th = th0
+val_z  = z0
+val_pr  = 0.0
+val_pth = P
+val_pz  = 0.0
+val_t   = t0
+
+#終了条件のカウント数分計算
+for count_th in range(max_count_number): #count_thは何度まで計算したか、任意の保存角度に達したかの判定に使う。
+    #現在の位置から磁場補完を行い、磁場の値を読み取る
+    val_th      = (count_th%boundary_theta_number)*dth #thの範囲外に出ないようにするため
+    Br, Bth, Bz = complement()
+
+    #ここで保存用のif分を入れておく
+    if count_th%save_count_number == 0:
+        result[0].append(val_t)
+        result[1].append(count_th*dth)
+        result[2].append(val_r)
+        result[3].append(val_z)
+        result[4].append(val_pr)
+        result[5].append(val_pth)
+        result[6].append(val_pz)
+        result[7].append(Br)
+        result[8].append(Bth)
+        result[9].append(Bz)
+        print(count_th*dth,val_r)
+
+    #常微分方程式を解くための変数の計算
+    p     = (val_pr**2.0 + val_pth**2.0 + val_pz**2.0)**0.5
+    beta  = (p/(m0**2.0 + p**2.0)**0.5)
+    gamma = 1.0/(1.0 - beta**2.0)**0.5
+
+    #古典的ルンゲクッタコード4段4次
+    RK_l = np.array([val_r, val_z, val_pr, val_pth, val_pz, val_t]) #arrayにしとかないと成分ごとの足し算ができない
+    ks   = RK_l.tolist()                 #いわゆるtemp的な仮の入れ物
+
+    #4回呼び出し
+    K1 = cal_RK()
+    ks = (RK_l + K1*0.5)      #
+    K2 = cal_RK()
+    ks = (RK_l + K2*0.5)      #
+    K3 = cal_RK()
+    ks = (RK_l + K3*1.0)      #
+    K4 = cal_RK()
+
+    #値の更新
+    K    = (K1 + 2.0*K2 + 2.0*K3 + K4)/6.0
+    RK_l = (RK_l + K).tolist()
+    val_r   = RK_l[0]
+    val_z   = RK_l[1]
+    val_pr  = RK_l[2]
+    val_pth = RK_l[3]
+    val_pz  = RK_l[4]
+    val_t   = RK_l[5]
+
+#==========================================================================
+"""セクション5
+データの保存
+"""
+con   = ('t [sec],th [deg.],r [m],z [m],pr [MeV/c],pth [MeV/c],pz [MeV/c],Br [T],Bth [T],Bz [T]')
+result = (np.array(result)).T
+np.savetxt(save_name+'.csv', result, fmt='%.18e', delimiter=',', header=con)
+#==============================================================================
